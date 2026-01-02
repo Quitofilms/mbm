@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="vault_app_name">Moment By Moment</string>
+    <string name="vault_version">1.0.0</string>
+
+    <string name="vault_root_folder">DCIM</string>
+    <string name="vault_sub_folder">MBM</string>
+
+    <string name="vault_clip_prefix">MBM_</string>
+    <string name="vault_date_pattern">yyyy_MM_dd</string>
+    <string name="vault_video_extension">.mp4</string>
+
+    <integer name="vault_clip_duration_ms">1000</integer>
+    <string name="vault_mime_type">video/mp4</string>
+
+    <string name="vault_btn_capture">Capture Moment</string>
+    <string name="vault_btn_export">Open in External Editor</string>
+    <string name="vault_permission_denied">Storage access is required to save to DCIM/MBM</string>
+    <string name="vault_processing">Saving moment to MBM folder...</string>
+</resources>
