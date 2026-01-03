@@ -129,14 +129,12 @@ class DashboardActivity : AppCompatActivity() {
 
     private fun setupDashboard() {
         if (!PermissionVault.hasAllPermissions(this)) {
-            // Hide everything related to the dashboard
             recyclerView.visibility = View.GONE
             fabAddJournal.visibility = View.GONE
             btnGrantAccess.visibility = View.VISIBLE
             return
         }
 
-        // Access granted: Show dashboard and Add button
         recyclerView.visibility = View.VISIBLE
         fabAddJournal.visibility = View.VISIBLE
         btnGrantAccess.visibility = View.GONE
@@ -164,8 +162,16 @@ class DashboardActivity : AppCompatActivity() {
             return
         }
 
-        val prefs = getSharedPreferences("MBM_NAMES", Context.MODE_PRIVATE)
-        val nameMap = journalFolders.associate { it.name to (prefs.getString(it.name, "") ?: "") }
+        // UPDATED: Read names directly from name.txt within each folder
+        val nameMap = journalFolders.associate { folder ->
+            val nameFile = File(folder, "name.txt")
+            val prettyName = if (nameFile.exists()) {
+                nameFile.readText().trim()
+            } else {
+                ""
+            }
+            folder.name to prettyName
+        }
 
         adapter = DashboardAdapter(journalFolders, nameMap,
             onFolderClick = { folder ->
@@ -215,8 +221,10 @@ class DashboardActivity : AppCompatActivity() {
 
     private fun showRenameDialog(folder: File) {
         val input = EditText(this)
-        val prefs = getSharedPreferences("MBM_NAMES", Context.MODE_PRIVATE)
-        input.setText(prefs.getString(folder.name, ""))
+        val nameFile = File(folder, "name.txt")
+        if (nameFile.exists()) {
+            input.setText(nameFile.readText().trim())
+        }
         input.setHint("Custom Journal Name")
 
         AlertDialog.Builder(this)
@@ -224,7 +232,15 @@ class DashboardActivity : AppCompatActivity() {
             .setView(input)
             .setPositiveButton("Save") { _, _ ->
                 val newName = input.text.toString()
-                prefs.edit().putString(folder.name, newName).apply()
+                // UPDATED: Write directly to name.txt file
+                try {
+                    val targetFile = File(folder, "name.txt")
+                    FileOutputStream(targetFile).use { output ->
+                        output.write(newName.toByteArray())
+                    }
+                } catch (e: Exception) {
+                    Log.e("MBM_DEBUG", "Failed to save name.txt: ${e.message}")
+                }
                 setupDashboard()
             }
             .setNegativeButton("Cancel", null)
@@ -289,8 +305,6 @@ class DashboardActivity : AppCompatActivity() {
             }
 
             folder.deleteRecursively()
-            val prefs = getSharedPreferences("MBM_NAMES", Context.MODE_PRIVATE)
-            prefs.edit().remove(folder.name).apply()
             setupDashboard()
         } catch (e: Exception) {
             Log.e("MBM_DEBUG", "Error deleting: ${e.message}")

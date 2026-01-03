@@ -59,6 +59,7 @@ class MainActivity : AppCompatActivity() {
         val folderId = intent.getStringExtra("FOLDER_ID") ?: "0001"
         val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         val mbmDir = File(downloads, "MBM/$folderId")
+        // FIXED: Corrected reference from bmmDir to mbmDir
         if (!mbmDir.exists()) mbmDir.mkdirs()
         return mbmDir
     }
@@ -97,8 +98,15 @@ class MainActivity : AppCompatActivity() {
         btnForceSync = findViewById(R.id.btn_force_sync)
 
         val folderId = intent.getStringExtra("FOLDER_ID") ?: "0001"
-        val prefs = getSharedPreferences("MBM_NAMES", Context.MODE_PRIVATE)
-        val customName = prefs.getString(folderId, null) ?: "Journal $folderId"
+        val vaultDir = getVaultDirectory()
+
+        // Read Title from name.txt in the vault directory
+        val nameFile = File(vaultDir, "name.txt")
+        val customName = if (nameFile.exists()) {
+            nameFile.readText().trim()
+        } else {
+            "Journal $folderId"
+        }
         tvTitle.text = customName.uppercase()
 
         fabBack.setOnClickListener { finish() }
@@ -182,7 +190,6 @@ class MainActivity : AppCompatActivity() {
                         intent.putExtra("DATE_STR", dateStr)
                         startActivity(intent)
                     } else {
-                        // UPDATED: Linked to centralized PermissionVault
                         if (PermissionVault.hasAllPermissions(this)) {
                             showSourceSelectionDialog(date)
                         } else {
