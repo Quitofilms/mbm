@@ -6,6 +6,10 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Build
@@ -36,6 +40,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -59,7 +64,6 @@ class MainActivity : AppCompatActivity() {
         val folderId = intent.getStringExtra("FOLDER_ID") ?: "0001"
         val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         val mbmDir = File(downloads, "MBM/$folderId")
-        // FIXED: Corrected reference from bmmDir to mbmDir
         if (!mbmDir.exists()) mbmDir.mkdirs()
         return mbmDir
     }
@@ -100,7 +104,6 @@ class MainActivity : AppCompatActivity() {
         val folderId = intent.getStringExtra("FOLDER_ID") ?: "0001"
         val vaultDir = getVaultDirectory()
 
-        // Read Title from name.txt in the vault directory
         val nameFile = File(vaultDir, "name.txt")
         val customName = if (nameFile.exists()) {
             nameFile.readText().trim()
@@ -292,11 +295,51 @@ class MainActivity : AppCompatActivity() {
         try {
             val fileName = "MBM_${fileDateFormatter.format(date)}.jpg"
             val destFile = File(getVaultDirectory(), fileName)
+
+            // OPTION 1: FORCE-ROTATE ON SAVE
             contentResolver.openInputStream(uri)?.use { input ->
-                FileOutputStream(destFile).use { output -> input.copyTo(output) }
+                val bitmap = BitmapFactory.decodeStream(input)
+
+                // Read EXIF orientation metadata
+                val orientation = getOrientationFromUri(uri)
+                val correctedBitmap = rotateBitmapIfRequired(bitmap, orientation)
+
+                FileOutputStream(destFile).use { output ->
+                    correctedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, output)
+                }
             }
             runOnUiThread { setupCalendarGrid() }
-        } catch (e: Exception) { Log.e("MBM_DEBUG", "Image Error: ${e.message}") }
+        } catch (e: Exception) {
+            Log.e("MBM_DEBUG", "Image Error: ${e.message}")
+            Toast.makeText(this, "Failed to save image", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    private fun getOrientationFromUri(uri: Uri): Int {
+        var orientation = ExifInterface.ORIENTATION_NORMAL
+        try {
+            contentResolver.openInputStream(uri)?.use { input ->
+                val exifInterface = ExifInterface(input)
+                orientation = exifInterface.getAttributeInt(
+                    ExifInterface.TAG_ORIENTATION,
+                    ExifInterface.ORIENTATION_NORMAL
+                )
+            }
+        } catch (e: Exception) {
+            Log.e("MBM_DEBUG", "Exif Error: ${e.message}")
+        }
+        return orientation
+    }
+
+    private fun rotateBitmapIfRequired(bitmap: Bitmap, orientation: Int): Bitmap {
+        val matrix = Matrix()
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            else -> return bitmap
+        }
+        return Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
     }
 
     private fun deleteExistingFromMediaStore(fileName: String, isVideo: Boolean) {

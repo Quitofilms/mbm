@@ -22,6 +22,7 @@ class TrimmerActivity : AppCompatActivity() {
     private lateinit var timeSlider: Slider
     private lateinit var tvTimestamp: TextView
     private lateinit var btnConfirm: Button
+    private lateinit var btnCancel: Button
 
     private var videoUri: Uri? = null
     private var videoDurationMs: Long = 0
@@ -34,17 +35,15 @@ class TrimmerActivity : AppCompatActivity() {
         timeSlider = findViewById(R.id.time_slider)
         tvTimestamp = findViewById(R.id.tv_timestamp)
         btnConfirm = findViewById(R.id.btn_confirm_trim)
+        btnCancel = findViewById(R.id.btn_cancel_trim)
 
         videoUri = intent.getParcelableExtra("VIDEO_URI")
 
         setupPlayer()
 
-        // Updated listener to prevent "snapping back" to 0
         timeSlider.addOnChangeListener { slider, value, fromUser ->
             if (fromUser) {
-                // Seek the player to the exact value of the slider
                 player.seekTo(value.toLong())
-                // Ensure the UI text reflects the current seek position
                 updateTimestampText(value.toLong())
             }
         }
@@ -54,6 +53,10 @@ class TrimmerActivity : AppCompatActivity() {
             val resultIntent = Intent()
             resultIntent.putExtra("START_MS", startMs)
             setResult(RESULT_OK, resultIntent)
+            finish()
+        }
+
+        btnCancel.setOnClickListener {
             finish()
         }
     }
@@ -66,7 +69,6 @@ class TrimmerActivity : AppCompatActivity() {
             val mediaItem = MediaItem.fromUri(it)
             player.setMediaItem(mediaItem)
             player.prepare()
-            // Confirmed: Autoplay is set to false
             player.playWhenReady = false
         }
 
@@ -74,12 +76,10 @@ class TrimmerActivity : AppCompatActivity() {
             override fun onPlaybackStateChanged(state: Int) {
                 if (state == Player.STATE_READY) {
                     videoDurationMs = player.duration
-                    // Logic Preserved: Ensure the slider can't go past the point where 1s is impossible
                     val maxStart = if (videoDurationMs > 1000) videoDurationMs - 1000 else 0
                     timeSlider.valueFrom = 0f
                     timeSlider.valueTo = maxStart.toFloat()
 
-                    // Initial setup only happens once when the player is ready
                     if (timeSlider.value == 0f) {
                         timeSlider.value = 0f
                         updateTimestampText(0)

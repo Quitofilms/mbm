@@ -28,6 +28,7 @@ import java.io.FileOutputStream
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.zip.ZipEntry
+import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 
 class DashboardActivity : AppCompatActivity() {
@@ -35,6 +36,7 @@ class DashboardActivity : AppCompatActivity() {
     private lateinit var recyclerView: RecyclerView
     private lateinit var fabAddJournal: FloatingActionButton
     private lateinit var btnGrantAccess: Button
+    private lateinit var btnImportJournal: Button
     private lateinit var adapter: DashboardAdapter
 
     private lateinit var btnExportYear: Button
@@ -49,6 +51,13 @@ class DashboardActivity : AppCompatActivity() {
         uri?.let { handleCoverSelection(it) }
     }
 
+    private val importZipLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val uri = result.data?.data
+            uri?.let { importJournalFromZip(it) }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_dashboard)
@@ -56,6 +65,7 @@ class DashboardActivity : AppCompatActivity() {
         recyclerView = findViewById(R.id.rv_journals)
         fabAddJournal = findViewById(R.id.fab_add_journal)
         btnGrantAccess = findViewById(R.id.btn_grant_access)
+        btnImportJournal = findViewById(R.id.btn_import_journal)
 
         btnExportYear = findViewById(R.id.btn_global_export_year)
         btnExportMonth = findViewById(R.id.btn_global_export_month)
@@ -67,6 +77,12 @@ class DashboardActivity : AppCompatActivity() {
 
         fabAddJournal.setOnClickListener {
             createNewJournal()
+        }
+
+        btnImportJournal.setOnClickListener {
+            val intent = Intent(Intent.ACTION_GET_CONTENT)
+            intent.type = "application/zip"
+            importZipLauncher.launch(intent)
         }
 
         btnGrantAccess.setOnClickListener {
@@ -132,11 +148,13 @@ class DashboardActivity : AppCompatActivity() {
             recyclerView.visibility = View.GONE
             fabAddJournal.visibility = View.GONE
             btnGrantAccess.visibility = View.VISIBLE
+            btnImportJournal.visibility = View.GONE
             return
         }
 
         recyclerView.visibility = View.VISIBLE
         fabAddJournal.visibility = View.VISIBLE
+        btnImportJournal.visibility = View.VISIBLE
         btnGrantAccess.visibility = View.GONE
 
         val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
@@ -162,7 +180,6 @@ class DashboardActivity : AppCompatActivity() {
             return
         }
 
-        // UPDATED: Read names directly from name.txt within each folder
         val nameMap = journalFolders.associate { folder ->
             val nameFile = File(folder, "name.txt")
             val prettyName = if (nameFile.exists()) {
@@ -187,7 +204,7 @@ class DashboardActivity : AppCompatActivity() {
     }
 
     private fun showJournalOptionsDialog(folder: File) {
-        val options = arrayOf("Rename", "Set Custom Cover", "Export Library (.zip)", "Delete")
+        val options = arrayOf("Rename", "Set Custom Cover", "Export Library (.zip)", "Export & Purge Journal", "Delete")
         AlertDialog.Builder(this)
             .setTitle("Journal ${folder.name} Options")
             .setItems(options) { _, which ->
@@ -197,8 +214,9 @@ class DashboardActivity : AppCompatActivity() {
                         targetFolderForCover = folder
                         pickCoverLauncher.launch("image/*")
                     }
-                    2 -> exportJournalAsZip(folder)
-                    3 -> showDeleteConfirmation(folder)
+                    2 -> exportJournalAsZip(folder, purgeAfter = false)
+                    3 -> exportJournalAsZip(folder, purgeAfter = true)
+                    4 -> showDeleteConfirmation(folder)
                 }
             }
             .show()
@@ -232,7 +250,6 @@ class DashboardActivity : AppCompatActivity() {
             .setView(input)
             .setPositiveButton("Save") { _, _ ->
                 val newName = input.text.toString()
-                // UPDATED: Write directly to name.txt file
                 try {
                     val targetFile = File(folder, "name.txt")
                     FileOutputStream(targetFile).use { output ->
@@ -247,7 +264,7 @@ class DashboardActivity : AppCompatActivity() {
             .show()
     }
 
-    private fun exportJournalAsZip(folder: File) {
+    private fun exportJournalAsZip(folder: File, purgeAfter: Boolean) {
         val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         val zipFile = File(downloadsDir, "MBM_Backup_${folder.name}.zip")
 
@@ -275,9 +292,74 @@ class DashboardActivity : AppCompatActivity() {
                 putExtra(Intent.EXTRA_STREAM, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            startActivity(Intent.createChooser(shareIntent, "Share Backup Zip"))
+
+            if (purgeAfter) {
+                AlertDialog.Builder(this)
+                    .setTitle("Purge Journal?")
+                    .setMessage("Zip created. Once you share/save this file, would you like to delete the local journal folder from your phone?")
+                    .setPositiveButton("Share & Purge") { _, _ ->
+                        startActivity(Intent.createChooser(shareIntent, "Share & Purge Backup"))
+                        deleteJournalFolder(folder)
+                    }
+                    .setNegativeButton("Share Only") { _, _ ->
+                        startActivity(Intent.createChooser(shareIntent, "Share Backup Zip"))
+                    }
+                    .show()
+            } else {
+                startActivity(Intent.createChooser(shareIntent, "Share Backup Zip"))
+            }
         } catch (e: Exception) {
             Toast.makeText(this, "Export failed: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun importJournalFromZip(zipUri: Uri) {
+        val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        val mbmDir = File(downloads, "MBM")
+
+        try {
+            val inputStream = contentResolver.openInputStream(zipUri) ?: return
+            val zipInputStream = ZipInputStream(inputStream)
+
+            // Check for name.txt to validate MBM journal
+            var isValidMbm = false
+            var entry = zipInputStream.nextEntry
+            val tempEntries = mutableListOf<Pair<String, ByteArray>>()
+
+            while (entry != null) {
+                if (entry.name == "name.txt") isValidMbm = true
+                if (!entry.isDirectory) {
+                    tempEntries.add(entry.name to zipInputStream.readBytes())
+                }
+                zipInputStream.closeEntry()
+                entry = zipInputStream.nextEntry
+            }
+            zipInputStream.close()
+
+            if (!isValidMbm) {
+                Toast.makeText(this, "Invalid File: No MBM metadata found", Toast.LENGTH_LONG).show()
+                return
+            }
+
+            // Determine next available folder ID
+            val existingFolders = mbmDir.listFiles { file -> file.isDirectory }?.map { it.name } ?: emptyList()
+            val nextId = (existingFolders.mapNotNull { it.toIntOrNull() }.maxOrNull() ?: 0) + 1
+            val newFolderName = String.format("%04d", nextId)
+            val newFolder = File(mbmDir, newFolderName)
+            newFolder.mkdirs()
+
+            // Extract entries to new folder
+            tempEntries.forEach { (name, data) ->
+                val outFile = File(newFolder, name)
+                FileOutputStream(outFile).use { it.write(data) }
+            }
+
+            Toast.makeText(this, "Journal Imported as $newFolderName", Toast.LENGTH_SHORT).show()
+            setupDashboard()
+
+        } catch (e: Exception) {
+            Log.e("MBM_DEBUG", "Import failed: ${e.message}")
+            Toast.makeText(this, "Import Error: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
 

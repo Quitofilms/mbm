@@ -6,7 +6,9 @@ import android.net.Uri
 import android.os.Bundle
 import android.provider.MediaStore
 import android.view.View
+import android.widget.Button
 import android.widget.ImageButton
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -17,6 +19,20 @@ class MediaPickerActivity : AppCompatActivity() {
 
     private lateinit var rvPicker: RecyclerView
     private lateinit var btnBack: ImageButton
+    private lateinit var btnOpenFileExplorer: Button
+
+    // NEW: Handle result from system file explorer
+    private val systemExplorerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
+        if (result.resultCode == RESULT_OK) {
+            val uri = result.data?.data
+            uri?.let {
+                val resultIntent = Intent()
+                resultIntent.data = it
+                setResult(RESULT_OK, resultIntent)
+                finish()
+            }
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -24,8 +40,19 @@ class MediaPickerActivity : AppCompatActivity() {
 
         rvPicker = findViewById(R.id.rv_media_picker)
         btnBack = findViewById(R.id.btn_picker_back)
+        btnOpenFileExplorer = findViewById(R.id.btn_open_file_explorer)
 
         btnBack.setOnClickListener { finish() }
+
+        // NEW: Button to use phone's file explorer for non-DCIM media
+        btnOpenFileExplorer.setOnClickListener {
+            val intent = Intent(Intent.ACTION_GET_CONTENT).apply {
+                type = "*/*"
+                putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("image/*", "video/*"))
+                addCategory(Intent.CATEGORY_OPENABLE)
+            }
+            systemExplorerLauncher.launch(intent)
+        }
 
         loadDeviceMedia()
     }
@@ -91,7 +118,6 @@ class MediaPickerActivity : AppCompatActivity() {
     }
 
     private fun setupRecyclerView(data: List<Any>) {
-        // Fix: Explicitly typed lambda parameter (selectedUri: Uri)
         val adapter = MediaPickerAdapter(data) { selectedUri: Uri ->
             val resultIntent = Intent()
             resultIntent.data = selectedUri

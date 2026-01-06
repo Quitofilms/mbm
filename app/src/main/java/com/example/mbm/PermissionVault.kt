@@ -54,6 +54,8 @@ object PermissionVault {
             // Android 13+ uses specific media permissions
             permissions.add(Manifest.permission.READ_MEDIA_IMAGES)
             permissions.add(Manifest.permission.READ_MEDIA_VIDEO)
+            // Added Notification permission for daily reminders
+            permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         } else {
             // Android 12 and below use standard storage permissions
             permissions.add(Manifest.permission.READ_EXTERNAL_STORAGE)
