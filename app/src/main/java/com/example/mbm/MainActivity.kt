@@ -21,6 +21,7 @@ import android.view.Menu
 import android.view.MenuItem
 import android.widget.EditText
 import android.widget.ImageButton
+import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
@@ -30,12 +31,8 @@ import androidx.appcompat.view.ActionMode
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
-import androidx.media3.common.MediaItem
-import androidx.media3.transformer.Transformer
-import androidx.media3.transformer.Composition
-import androidx.media3.transformer.ExportResult
-import androidx.media3.transformer.ExportException
 import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.floatingactionbutton.FloatingActionButton
 import java.io.File
@@ -84,10 +81,12 @@ class MainActivity : AppCompatActivity() {
     private val trimmerLauncher = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         if (result.resultCode == RESULT_OK) {
             val startMs = result.data?.getLongExtra("START_MS", 0L) ?: 0L
+            val rotation = result.data?.getIntExtra("ROTATION_DEGREES", 0) ?: 0
             val uri = selectedVideoUri
             val date = pendingDate
             if (uri != null && date != null) {
-                trimAndSaveVideo(uri, date, startMs)
+                // Pass the rotation value to the save function
+                trimAndSaveVideo(uri, date, startMs, rotation)
             }
         }
     }
@@ -165,6 +164,10 @@ class MainActivity : AppCompatActivity() {
     private fun setupCalendarGrid() {
         val masterList = mutableListOf<Any>()
         val calendar = Calendar.getInstance()
+        val today = Calendar.getInstance()
+        var todayPosition = -1
+
+        // Assuming project is set for 2026 based on previous context
         calendar.set(2026, Calendar.JANUARY, 1, 0, 0, 0)
         val monthFormat = SimpleDateFormat("MMM", Locale.getDefault())
         var lastMonth = -1
@@ -174,6 +177,12 @@ class MainActivity : AppCompatActivity() {
                 masterList.add(monthFormat.format(calendar.time).uppercase())
                 lastMonth = currentMonth
             }
+
+            if (calendar.get(Calendar.YEAR) == today.get(Calendar.YEAR) &&
+                calendar.get(Calendar.DAY_OF_YEAR) == today.get(Calendar.DAY_OF_YEAR)) {
+                todayPosition = masterList.size
+            }
+
             masterList.add(calendar.time.clone() as Date)
             calendar.add(Calendar.DAY_OF_YEAR, 1)
         }
@@ -208,8 +217,18 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         )
-        recyclerView.layoutManager = GridLayoutManager(this, 3)
+        val layoutManager = GridLayoutManager(this, 3)
+        recyclerView.layoutManager = layoutManager
         recyclerView.adapter = calendarAdapter
+
+        if (todayPosition != -1) {
+            // scrollToPositionWithOffset centers the item in the list
+            recyclerView.post {
+                // Approximate 2 rows up from center to show previous/next clearly
+                val offset = (recyclerView.height / 2) - 150 
+                layoutManager.scrollToPositionWithOffset(todayPosition, offset)
+            }
+        }
     }
 
     private fun showSourceSelectionDialog(date: Date) {
@@ -246,7 +265,40 @@ class MainActivity : AppCompatActivity() {
             selectedVideoUri = uri
             launchTrimmer(uri)
         } else {
-            pendingDate?.let { date -> saveImageToVault(uri, date) }
+            pendingDate?.let { date -> showImageRotationDialog(uri, date) }
+        }
+    }
+
+    private fun showImageRotationDialog(uri: Uri, date: Date) {
+        val imageView = ImageView(this)
+        var currentRotation = 0f
+
+        val inputStream = contentResolver.openInputStream(uri)
+        val originalBitmap = BitmapFactory.decodeStream(inputStream)
+        inputStream?.close()
+
+        val initialExif = getOrientationFromUri(uri)
+        var bitmap = rotateBitmapIfRequired(originalBitmap, initialExif)
+
+        imageView.setImageBitmap(bitmap)
+        imageView.setPadding(16, 16, 16, 16)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("Rotate Image if Needed")
+            .setView(imageView)
+            .setPositiveButton("Save") { _, _ ->
+                saveFinalImage(bitmap, date)
+            }
+            .setNegativeButton("Cancel", null)
+            .setNeutralButton("Rotate 90°") { _, _ -> }
+            .create()
+
+        dialog.show()
+
+        dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+            val matrix = Matrix().apply { postRotate(90f) }
+            bitmap = Bitmap.createBitmap(bitmap, 0, 0, bitmap.width, bitmap.height, matrix, true)
+            imageView.setImageBitmap(bitmap)
         }
     }
 
@@ -256,61 +308,41 @@ class MainActivity : AppCompatActivity() {
         trimmerLauncher.launch(intent)
     }
 
-    private fun trimAndSaveVideo(uri: Uri, date: Date, startMs: Long) {
+    private fun trimAndSaveVideo(uri: Uri, date: Date, startMs: Long, rotationDegrees: Int) {
         val dateStr = fileDateFormatter.format(date)
         val fileName = "MBM_$dateStr.mp4"
         val mbmDir = getVaultDirectory()
         val destFile = File(mbmDir, fileName)
-        val mediaItem = MediaItem.Builder()
-            .setUri(uri)
-            .setClippingConfiguration(MediaItem.ClippingConfiguration.Builder()
-                .setStartPositionMs(startMs)
-                .setEndPositionMs(startMs + 1000)
-                .build())
-            .build()
-        val transformer = Transformer.Builder(this).build()
-        transformer.addListener(object : Transformer.Listener {
-            override fun onCompleted(composition: Composition, exportResult: ExportResult) {
-                recyclerView.postDelayed({
-                    runOnUiThread {
-                        Toast.makeText(applicationContext, "Surgical Cut Saved", Toast.LENGTH_SHORT).show()
-                        setupCalendarGrid()
-                    }
-                }, 500)
+
+        val engine = ExportEngine(this)
+        engine.performSurgicalCut(uri, startMs, rotationDegrees, destFile, object : ExportEngine.ExportListener {
+            override fun onStart() {
+                Toast.makeText(this@MainActivity, "Initiating Surgical Cut...", Toast.LENGTH_SHORT).show()
             }
-            override fun onError(composition: Composition, exportResult: ExportResult, e: ExportException) {
-                Log.e("MBM_DEBUG", "Trim failed: ${e.message}")
+            override fun onProgress(progress: Int) {}
+            override fun onCompleted(outputFile: File) {
+                runOnUiThread {
+                    Toast.makeText(applicationContext, "Surgical Cut Saved", Toast.LENGTH_SHORT).show()
+                    setupCalendarGrid()
+                }
+            }
+            override fun onError(message: String) {
+                Log.e("MBM_DEBUG", "Trim failed: $message")
             }
         })
-        try {
-            if (destFile.exists()) {
-                deleteExistingFromMediaStore(fileName, isVideo = true)
-                destFile.delete()
-            }
-            transformer.start(mediaItem, destFile.absolutePath)
-        } catch (e: Exception) { Log.e("MBM_DEBUG", "Start failed: ${e.message}") }
     }
 
-    private fun saveImageToVault(uri: Uri, date: Date) {
+    private fun saveFinalImage(bitmap: Bitmap, date: Date) {
         try {
             val fileName = "MBM_${fileDateFormatter.format(date)}.jpg"
             val destFile = File(getVaultDirectory(), fileName)
 
-            // OPTION 1: FORCE-ROTATE ON SAVE
-            contentResolver.openInputStream(uri)?.use { input ->
-                val bitmap = BitmapFactory.decodeStream(input)
-
-                // Read EXIF orientation metadata
-                val orientation = getOrientationFromUri(uri)
-                val correctedBitmap = rotateBitmapIfRequired(bitmap, orientation)
-
-                FileOutputStream(destFile).use { output ->
-                    correctedBitmap.compress(Bitmap.CompressFormat.JPEG, 95, output)
-                }
+            FileOutputStream(destFile).use { output ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 95, output)
             }
             runOnUiThread { setupCalendarGrid() }
         } catch (e: Exception) {
-            Log.e("MBM_DEBUG", "Image Error: ${e.message}")
+            Log.e("MBM_DEBUG", "Image Save Error: ${e.message}")
             Toast.makeText(this, "Failed to save image", Toast.LENGTH_SHORT).show()
         }
     }

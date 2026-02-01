@@ -1,3 +1,7 @@
+import java.io.File
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -35,6 +39,29 @@ android {
     }
 }
 
+tasks.register("copyApkToYDrive") {
+    doLast {
+        val buildDir = layout.buildDirectory.get().asFile
+        val apkFile = File(buildDir, "outputs/apk/debug/app-debug.apk")
+        val destinationDir = File("Y:/apps/mbm")
+        val destinationFile = File(destinationDir, "mbm.apk")
+
+        if (apkFile.exists()) {
+            if (!destinationDir.exists()) {
+                destinationDir.mkdirs()
+            }
+            Files.copy(apkFile.toPath(), destinationFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
+            println("APK copied and renamed to: ${destinationFile.absolutePath}")
+        } else {
+            println("Source APK not found at: ${apkFile.absolutePath}")
+        }
+    }
+}
+
+afterEvaluate {
+    tasks.findByName("assembleDebug")?.finalizedBy("copyApkToYDrive")
+}
+
 dependencies {
     // Core AndroidX Components
     implementation(libs.androidx.core.ktx)
@@ -49,6 +76,7 @@ dependencies {
     // Media3 Pipeline (1.2.0 is stable on SDK 35)
     implementation("androidx.media3:media3-transformer:1.2.0")
     implementation("androidx.media3:media3-common:1.2.0")
+    implementation("androidx.media3:media3-effect:1.2.0")
     implementation("androidx.media3:media3-ui:1.2.0")
     implementation("androidx.media3:media3-exoplayer:1.2.0")
 
