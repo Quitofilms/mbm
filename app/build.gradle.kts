@@ -1,7 +1,3 @@
-import java.io.File
-import java.nio.file.Files
-import java.nio.file.StandardCopyOption
-
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -37,29 +33,6 @@ android {
     kotlinOptions {
         jvmTarget = "11"
     }
-}
-
-tasks.register("copyApkToYDrive") {
-    doLast {
-        val buildDir = layout.buildDirectory.get().asFile
-        val apkFile = File(buildDir, "outputs/apk/debug/app-debug.apk")
-        val destinationDir = File("Y:/apps/mbm")
-        val destinationFile = File(destinationDir, "mbm.apk")
-
-        if (apkFile.exists()) {
-            if (!destinationDir.exists()) {
-                destinationDir.mkdirs()
-            }
-            Files.copy(apkFile.toPath(), destinationFile.toPath(), StandardCopyOption.REPLACE_EXISTING)
-            println("APK copied and renamed to: ${destinationFile.absolutePath}")
-        } else {
-            println("Source APK not found at: ${apkFile.absolutePath}")
-        }
-    }
-}
-
-afterEvaluate {
-    tasks.findByName("assembleDebug")?.finalizedBy("copyApkToYDrive")
 }
 
 dependencies {

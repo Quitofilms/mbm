@@ -1,0 +1,13 @@
+# Ignore local build outputs and sensitive files for AI Agents
+app/build/
+.gradle/
+.idea/
+gradle/
+local.properties
+*.apk
+*.zip
+*.log
+# Do not share private keystores or secrets if they existed
+*.jks
+*.keystore
+secrets.xml
